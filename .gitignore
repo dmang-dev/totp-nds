@@ -1,0 +1,13 @@
+build/
+*.elf
+*.map
+*.o
+*.d
+
+# Keep the published .nds artifact committed (family convention).
+!totp-nds.nds
+
+# Editor / OS
+*.swp
+Thumbs.db
+.DS_Store

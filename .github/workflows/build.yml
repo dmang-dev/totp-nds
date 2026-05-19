@@ -1,0 +1,48 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  kats:
+    name: KAT runner (host)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and run KATs
+        run: |
+          cd tests
+          make check
+
+  build:
+    name: build totp-nds.nds
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain versions
+        run: |
+          arm-none-eabi-gcc --version | head -1
+          ls $DEVKITPRO/libnds/include/nds.h >/dev/null && echo "libnds OK"
+
+      - name: Build totp-nds.nds
+        run: |
+          # devkitARM container already has DEVKITARM + DEVKITPRO exported
+          make
+          ls -lh totp-nds.nds
+
+      - name: Upload .nds artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: totp-nds
+          path: totp-nds.nds
+          retention-days: 30

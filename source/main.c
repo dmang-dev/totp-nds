@@ -1,0 +1,104 @@
+/*
+ * totp-nds — RFC 6238 TOTP authenticator for Nintendo DS / DS Lite,
+ * with native runtime on DSi and 3DS via DS-mode.
+ *
+ * Sibling of totp-gb / totp-gba / totp-psp. The crypto core (sha1.c,
+ * hmac.c, base32.c, totp.c, datetime.c) is byte-for-byte identical
+ * across all four — if those KATs pass on GBA they pass here. Platform
+ * glue is NDS-specific: rtc.c (hardware RTC via libnds + newlib time),
+ * storage.c (libfat to SD or DLDI flashcart), ui.c (dual-screen
+ * PrintConsole text mode).
+ *
+ * Boot sequence:
+ *   1. videoSetMode + dual PrintConsole init (top = display, bottom = menu)
+ *   2. Self-test: run RFC 6238 KAT vectors, print PASS/FAIL for ~1s
+ *   3. storage_init: mount libfat, load or format /totp-nds.dat
+ *   4. RTC seed: prefer saved epoch, fall back to hardware RTC; if
+ *      this is first boot, drop into ui_timeset() so codes aren't off
+ *      by years.
+ *   5. ui_main() — never returns.
+ */
+#include <nds.h>
+#include <fat.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include "storage.h"
+#include "rtc.h"
+#include "totp.h"
+#include "ui.h"
+
+/* Forward decl — defined in ui.c, called only from here. */
+void _ui_init_consoles(void);
+
+/* ---- boot self-test (RFC 6238 KATs) --------------------------------- */
+#define DEMO_SECRET "JBSWY3DPEHPK3PXP"
+
+struct kat { uint32_t epoch; uint32_t expected; };
+static const struct kat KATS[] = {
+    {          0u, 282760u },
+    { 1234567890u, 742275u },
+    { 1778088090u, 283711u },
+    { 1778088141u, 113232u },
+};
+#define NUM_KATS (sizeof(KATS) / sizeof(KATS[0]))
+
+static int run_self_test(void) {
+    consoleClear();
+    iprintf("totp-nds self-test (RFC 6238)\n");
+    iprintf("secret: %s (\"Hello!\")\n\n", DEMO_SECRET);
+    unsigned pass = 0u;
+    for (unsigned i = 0u; i < NUM_KATS; i++) {
+        uint32_t got = totp_generate(DEMO_SECRET, KATS[i].epoch);
+        int ok = (got == KATS[i].expected);
+        iprintf("  epoch=%-10u got=%06u\n             expected=%06u  %s\n",
+                (unsigned)KATS[i].epoch,
+                (unsigned)got,
+                (unsigned)KATS[i].expected,
+                ok ? "PASS" : "FAIL");
+        if (ok) pass++;
+    }
+    iprintf("\n  result: %u/%u PASS\n", pass, (unsigned)NUM_KATS);
+    if (pass != NUM_KATS) {
+        iprintf("\n *** SELF-TEST FAILED ***\n  halting 5s.\n");
+        for (int i = 0; i < 5 * 60; i++) swiWaitForVBlank();
+        return 0;
+    }
+    /* ~1s pause so a human watching boot can read the result. */
+    for (int i = 0; i < 60; i++) swiWaitForVBlank();
+    return 1;
+}
+
+int main(void) {
+    /* Bring up a bare bottom-screen console early so the self-test has
+     * somewhere to print. _ui_init_consoles() re-does this later with
+     * the dual-screen layout for the main UI. */
+    consoleDemoInit();
+
+#ifndef SKIP_SELFTEST
+    (void)run_self_test();
+#endif
+
+    /* Real dual-screen layout. */
+    _ui_init_consoles();
+
+    /* Load (or format) the savedata file. */
+    uint8_t loaded = storage_init();
+
+    /* Seed software RTC: prefer the saved epoch (current at last
+     * write), fall back to the NDS hardware RTC otherwise. On true
+     * first boot, push the user through time-set so codes aren't
+     * decades off. */
+    uint32_t saved = storage_get_epoch();
+    if (loaded && saved != 0u) {
+        rtc_set_epoch(saved);
+    } else {
+        rtc_init_from_system();
+        uint32_t e = ui_timeset(rtc_get_epoch());
+        rtc_set_epoch(e);
+        storage_set_epoch(e);
+    }
+
+    ui_main();   /* never returns */
+    return 0;
+}
