@@ -4,8 +4,9 @@ build/
 *.o
 *.d
 
-# Keep the published .nds artifact committed (family convention).
+# Keep the published artifacts committed (family convention).
 !totp-nds.nds
+!totp-nds.dsi
 
 # Editor / OS
 *.swp

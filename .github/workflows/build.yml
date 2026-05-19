@@ -34,15 +34,18 @@ jobs:
           arm-none-eabi-gcc --version | head -1
           ls $DEVKITPRO/libnds/include/nds.h >/dev/null && echo "libnds OK"
 
-      - name: Build totp-nds.nds
+      - name: Build totp-nds.nds + totp-nds.dsi
         run: |
           # devkitARM container already has DEVKITARM + DEVKITPRO exported
           make
-          ls -lh totp-nds.nds
+          make dsi
+          ls -lh totp-nds.nds totp-nds.dsi
 
-      - name: Upload .nds artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: totp-nds
-          path: totp-nds.nds
+          path: |
+            totp-nds.nds
+            totp-nds.dsi
           retention-days: 30

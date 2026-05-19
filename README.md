@@ -30,23 +30,30 @@ across all four; this project adds NDS-specific platform glue:
 
 ## Try it
 
-Pre-built ROM is checked into [`totp-nds.nds`](totp-nds.nds) (~150 KB).
+Two pre-built artifacts are checked in:
+
+| File | Use when | Why |
+|---|---|---|
+| [`totp-nds.nds`](totp-nds.nds) | DS / DS Lite (DLDI flashcart), or DSi/3DS via DS-mode | Universal — runs everywhere via DS-mode |
+| [`totp-nds.dsi`](totp-nds.dsi) | DSi / 2DS / 3DS exclusively | DSi-enhanced header (unit code 0x03, 0x4000-byte header) — Home Menu / TWiLight Menu++ recognizes it as a DSi app rather than a DS-mode ROM. Same binary semantics for now; v1.1+ adds DSi-only features (WiFi NTP) and v2.0+ adds DSi camera support |
 
 ### DSi / 3DS
 
-Native runtime on both — drop `totp-nds.nds` on the SD card. With
-TWiLight Menu++ on a DSi/3DS, just launch it from the homebrew menu.
+Drop either file on the SD card. Use `.dsi` for cleanest Home Menu /
+launcher integration; use `.nds` if your launcher only handles the
+plain format.
 
 ### Original DS / DS Lite
 
-Requires a DLDI-patched flashcart (R4, EZ-Flash, etc.). Copy
-`totp-nds.nds` to the cart's SD card; the flashcart loader handles
-the DLDI patching transparently on most modern cards.
+Use `totp-nds.nds`. Requires a DLDI-patched flashcart (R4, EZ-Flash,
+etc.). The flashcart loader handles DLDI patching transparently on
+most modern cards.
 
 ### Emulators
 
-DeSmuME, melonDS, no$gba all run it directly. melonDS is recommended
-for the most accurate RTC behavior (DeSmuME's RTC drifts).
+DeSmuME, melonDS, no$gba all run `totp-nds.nds` directly. For the
+`.dsi`, use melonDS in DSi-mode (DeSmuME doesn't emulate DSi). melonDS
+is also recommended for the most accurate RTC behavior.
 
 First boot lands on the time-set screen so the software RTC isn't off
 by years. After that you're on the live account list.
@@ -114,10 +121,11 @@ CI runs both layers on every push — see
 ## Build from source
 
 Requires **devkitPro** with the `nds-dev` meta-package (includes
-devkitARM, libnds, libfat): <https://github.com/devkitPro/installer/releases>
+devkitARM, libnds, libfat, Calico): <https://github.com/devkitPro/installer/releases>
 
 ```
-make            # builds totp-nds.nds
+make            # builds totp-nds.nds (universal)
+make dsi        # builds totp-nds.dsi (DSi-enhanced header)
 make clean
 ```
 
@@ -125,6 +133,7 @@ Or use the Windows convenience wrapper:
 
 ```
 .\build.bat
+.\build.bat dsi
 .\build.bat clean
 ```
 

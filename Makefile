@@ -71,9 +71,25 @@ $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
+.PHONY: dsi
+# DSi-enhanced build: same ELF, repackaged with ndstool's DSi header
+# (0x4000-byte header, DSi unit code, DSi title-ID prefix). Identifies
+# as a DSi app to Home Menu / TWiLight Menu++ instead of "DS-mode
+# running on DSi". Same binary semantics — the differentiating features
+# (WiFi NTP, camera) arrive in v1.1+.
+#
+# Uses the same Calico ARM7 ELF as the standard .nds build; for stage A
+# we don't need DSi-only ARM7 features, only a DSi-flagged header.
+dsi: $(BUILD)
+	@ndstool -c $(TARGET).dsi -9 $(TARGET).elf \
+		-7 $(CALICO)/bin/ds7_maine.elf \
+		-h 0x4000 -u 0x00030004 \
+		-b $(CALICO)/share/nds-icon.bmp "$(GAME_TITLE) (DSi);$(GAME_SUBTITLE1);$(GAME_SUBTITLE2)"
+	@echo built ... $(TARGET).dsi
+
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).elf $(TARGET).nds
+	@rm -fr $(BUILD) $(TARGET).elf $(TARGET).nds $(TARGET).dsi
 
 else
 
