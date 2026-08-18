@@ -6,10 +6,12 @@ codes — but running on an ARM946E-S / ARM7TDMI dual-CPU console from
 2004.
 
 Sibling repo to [`totp-gb`](https://github.com/dmang-dev/totp-gb),
-[`totp-gba`](https://github.com/dmang-dev/totp-gba), and
+[`totp-gba`](https://github.com/dmang-dev/totp-gba),
+[`totp-3ds`](https://github.com/dmang-dev/totp-3ds) and
 [`totp-psp`](https://github.com/dmang-dev/totp-psp). The crypto core
-(SHA-1 / HMAC / Base32 / TOTP / date math) is shared byte-for-byte
-across all four; this project adds NDS-specific platform glue:
+(SHA-1 / HMAC / Base32 / TOTP) is shared byte-for-byte across all five
+repos; the date-math module is shared by every port except `totp-gb`,
+which doesn't need it. This project adds NDS-specific platform glue:
 
 - **Hardware RTC** — Toshiba TC8521 on the NDS mainboard, read via
   newlib's `time()` (libnds wires it up over the ARM7/ARM9 IPC FIFO).

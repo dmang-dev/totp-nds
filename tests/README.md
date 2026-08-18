@@ -25,5 +25,8 @@ On Windows without MinGW installed, this is exercised in CI instead
 
 Four vectors against the RFC 6238 test secret `JBSWY3DPEHPK3PXP`
 (base32-encoded `"Hello!"`). These match the vectors used by every
-sibling — `totp-gb/tests/`, `totp-gba/main.c`, `totp-psp/tests/` — so a
-single break in the shared crypto core fails CI in all four repos.
+sibling — `totp-gb/tests/`, `totp-gba/tests/`, `totp-3ds/tests/` and
+`totp-psp/tests/` — so a single break in the shared crypto core fails CI
+across all five repos. (`totp-3ds` and `totp-psp` use the same
+`tests/run_kats.c` host harness as this repo; `totp-gb` and `totp-gba`
+drive a headless emulator instead.)
