@@ -70,6 +70,36 @@ static int run_self_test(void) {
     return 1;
 }
 
+#ifdef DSI_BUILD
+/* ---- NTP status line -------------------------------------------------
+ *
+ * Map an ntp_sync() result to something the user can act on. The top
+ * screen is 32 columns and ui_show_ntp_progress() indents only the
+ * first line, so continuation lines carry their own two spaces; keep
+ * every line under 30 characters.
+ *
+ * NTP_NO_PROFILE is the one worth spelling out. It's the only failure
+ * the user can actually fix, and a generic "sync failed" gives them no
+ * hint that the fix lives in System Settings. */
+static const char *ntp_status_text(int rc) {
+    switch (rc) {
+    case NTP_OK:         return "WiFi time-sync OK.";
+    case NTP_NO_PROFILE: return "No WiFi profile found.\n"
+                                "  Add one in System Settings\n"
+                                "  to sync automatically.";
+    case NTP_WIFI_FAIL:  return "WiFi unavailable.";
+    case NTP_NOT_ASSOC:  return "Couldn't join the network.\n"
+                                "  Check the AP is in range.";
+    case NTP_DNS_FAIL:   return "Joined, but DNS lookup\n  failed.";
+    case NTP_SOCK_FAIL:  return "Network socket error.";
+    case NTP_TIMEOUT:    return "No reply from time server.";
+    case NTP_BAD_REPLY:  return "Bad reply from time server.";
+    case NTP_CANCELLED:  return "Sync cancelled.";
+    default:             return "WiFi sync failed.";
+    }
+}
+#endif
+
 int main(void) {
     /* Bring up a bare bottom-screen console early so the self-test has
      * somewhere to print. _ui_init_consoles() re-does this later with
@@ -102,20 +132,29 @@ int main(void) {
 
 #ifdef DSI_BUILD
     {
-        /* Briefly tell the user what we're doing. ntp_sync() does its
-         * own ~15-second budget; the UI message stays on screen until
-         * sync resolves or the user cancels with B. */
-        ui_show_ntp_progress("Syncing time over WiFi...\nB cancels.");
+        /* Tell the user what we're doing. ntp_sync() budgets up to ~20s
+         * for association plus ~5s for the round-trip, and samples B on
+         * every frame throughout, so the cancel offer here is real. */
+        ui_show_ntp_progress("Syncing time over WiFi...\n  B cancels.");
         uint32_t e_ntp = 0u;
         int rc = ntp_sync(&e_ntp);
         if (rc == NTP_OK) {
             rtc_set_epoch(e_ntp);
             storage_set_epoch(e_ntp);
-            ui_show_ntp_progress("WiFi time-sync OK.");
+            ui_show_ntp_progress(ntp_status_text(rc));
             time_known = 1u;
         } else {
-            /* Non-fatal — fall through to the other clock sources. */
-            ui_show_ntp_progress("WiFi sync skipped.\nUsing saved/HW clock.");
+            /* Non-fatal — fall through to the other clock sources. The
+             * screen that follows (account list, or time-set) already
+             * shows what we fell back to, so this line only has to say
+             * why the sync didn't happen. */
+            ui_show_ntp_progress(ntp_status_text(rc));
+            /* Several of these lines carry an instruction, and
+             * ui_show_ntp_progress only builds in ~0.5s. Cancelling is
+             * deliberate though — don't stall someone who asked to skip. */
+            if (rc != NTP_CANCELLED) {
+                for (int i = 0; i < 2 * 60; i++) swiWaitForVBlank();
+            }
         }
     }
 #endif
