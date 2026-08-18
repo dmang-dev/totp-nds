@@ -43,7 +43,7 @@ jobs:
           ls -lh totp-nds.nds totp-nds.dsi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: totp-nds
           path: |
