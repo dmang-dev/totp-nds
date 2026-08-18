@@ -13,9 +13,9 @@
  *   1. videoSetMode + dual PrintConsole init (top = display, bottom = menu)
  *   2. Self-test: run RFC 6238 KAT vectors, print PASS/FAIL for ~1s
  *   3. storage_init: mount libfat, load or format /totp-nds.dat
- *   4. RTC seed: prefer saved epoch, fall back to hardware RTC; if
- *      this is first boot, drop into ui_timeset() so codes aren't off
- *      by years.
+ *   4. RTC seed: WiFi NTP first on the DSi build, else the saved epoch.
+ *      The hardware RTC only pre-fills ui_timeset(), which the user
+ *      confirms — see the priority-order note in main().
  *   5. ui_main() — never returns.
  */
 #include <nds.h>
@@ -92,9 +92,10 @@ int main(void) {
      *      authoritative.
      *   2. Saved epoch from storage — preserves time across power
      *      cycles even if WiFi is offline at this boot.
-     *   3. NDS hardware RTC.
-     *   4. Manual time-set screen (first boot or NTP+hardware both
-     *      bogus).
+     *   3. NDS hardware RTC — pre-fills the time-set screen only. Never
+     *      trusted unconfirmed (no timezone field; usually local time).
+     *   4. Manual time-set screen, confirmed by the user. Reached on
+     *      first boot, or when NTP failed and nothing was saved.
      */
     uint32_t saved = storage_get_epoch();
     uint8_t  time_known = 0u;
@@ -124,13 +125,15 @@ int main(void) {
             rtc_set_epoch(saved);
             time_known = 1u;
         } else {
+            /* No saved epoch — seed the anchor from the hardware RTC so
+             * the time-set screen opens pre-filled with a close guess.
+             * We deliberately do NOT accept it unconfirmed: the NDS RTC
+             * has no timezone field and users overwhelmingly set it to
+             * local time, while we interpret the reading as UTC. Taking
+             * it silently would generate codes off by the user's UTC
+             * offset with nothing on screen to explain why. Confirming
+             * through ui_timeset() is what tells us it really is UTC. */
             rtc_init_from_system();
-            /* Trust the hardware RTC if it reads a sane year; otherwise
-             * push the user through time-set. */
-            if (rtc_get_epoch() > 1577836800UL /* 2020-01-01 */) {
-                time_known = 1u;
-                storage_set_epoch(rtc_get_epoch());
-            }
         }
     }
 
