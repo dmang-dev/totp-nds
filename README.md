@@ -241,14 +241,22 @@ host KAT harness + CI all green on every push. This release does **not**
 include WiFi time-sync — `totp-nds.dsi` at v1.0.1 is the universal
 binary in a DSi-flagged header.
 
-**v1.1.0** — merged to `main`, unreleased. Adds the SNTPv3 WiFi
-time-sync described above to the `.dsi` build. Association runs through
-libnds' `wfc.h` API, which reaches the DSi's WPA/WPA2-capable profile
-slots and keeps the sync cancellable at any point, and the radio is
-powered down again on every exit path. Not yet validated on DSi
-hardware — that is the one thing between this and a v1.1.0 tag.
+**v1.1.0** — shipped. Adds the SNTPv3 WiFi time-sync described above to
+the `.dsi` build. Association runs through libnds' `wfc.h` API, which
+reaches the DSi's WPA/WPA2-capable profile slots and keeps the sync
+cancellable at any point, and the radio is powered down again on every
+exit path. Both prebuilt ROMs are the CI-built artifacts, not local
+builds. Shipped **without validation on DSi hardware** — see below.
 
 **Known limitations**:
+
+- **The WiFi time-sync has never run on a real DSi.** It builds, links
+  and gates correctly, but no part of the network path — association,
+  DHCP, DNS, the NTP round-trip, WPA2, or the radio power-down — has
+  been exercised on hardware. If it misbehaves, the failure is designed
+  to be non-fatal: any error falls through to the saved clock or the
+  manual time-set screen, and the on-screen status line names the
+  reason.
 
 - Storage uses libfat (`fat:/totp-nds.dat`), which requires DLDI patching
   on flashcarts. The flashcart's loader normally handles this transparently.
