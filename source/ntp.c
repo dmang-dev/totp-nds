@@ -51,7 +51,13 @@
 #define NTP_SERVER       "pool.ntp.org"
 #define NTP_PORT         123
 #define NTP_PACKET_BYTES 48
-#define NTP_EPOCH_OFFSET 2208988800UL
+#define NTP_EPOCH_OFFSET 2208988800UL   /* era 0: NTP 1900 -> Unix 1970  */
+#define NTP_ERA1_OFFSET  2085978496UL   /* era 1: 2^32 - NTP_EPOCH_OFFSET */
+
+/* Frames to wait for the radio to reach WlMgrState_Stopped. Purely a
+ * courtesy wait so we don't leave it half-torn-down; we return either
+ * way. */
+#define WIFI_STOP_BUDGET (2 * 60)       /* 2s */
 
 /* Frame budgets — each frame is 1/60 s. Association gets a generous
  * window because WPA2 + DHCP on a cold radio is genuinely slow; the
@@ -71,14 +77,38 @@ static int b_pressed(void) {
     return (keysDown() & KEY_B) ? 1 : 0;
 }
 
-/* Tear the association down on the way out and pass the caller's result
- * code through, so every exit path below stays a one-liner. Leaving the
- * radio associated would keep it powered for the rest of the session —
- * a real battery cost on a DS for a lookup that takes seconds.
+/* Tear the radio down on the way out and pass the caller's result code
+ * through, so every exit path below stays a one-liner.
+ *
+ * Two steps, because they do different things. Wifi_DisconnectAP()
+ * disassociates, which drops the link but leaves the wireless interface
+ * started and powered — dswifi has no deinit entry point of its own, and
+ * its examples simply never shut down. wlmgrStop() is the layer that
+ * actually stops the interface: calico owns the hardware (Mitsumi on DS,
+ * Atheros on DSi) and wlmgr is the manager dswifi is built on, so this is
+ * the documented way to reach WlMgrState_Stopped. Skipping it leaves the
+ * radio powered for the rest of the session, which on a DS is a real
+ * battery cost after a lookup that takes seconds.
+ *
+ * We only sync once, at boot, so tearing the stack down underneath dswifi
+ * is safe here — nothing touches the network afterwards. A future re-sync
+ * feature would need to call Wifi_InitDefault() again, not assume the
+ * stack is still up.
  *
  * Only valid once Wifi_InitDefault() has succeeded. */
 static int wifi_down(int rc) {
+    int frame;
+
     Wifi_DisconnectAP();
+    wlmgrStop();
+
+    /* Courtesy wait so we don't return mid-teardown. Bounded: if the
+     * interface never reports Stopped we return anyway rather than
+     * hanging the boot on a power-saving nicety. */
+    for (frame = 0; frame < WIFI_STOP_BUDGET; frame++) {
+        if (wlmgrGetState() == WlMgrState_Stopped) break;
+        swiWaitForVBlank();
+    }
     return rc;
 }
 
@@ -197,14 +227,34 @@ int ntp_sync(uint32_t *out_epoch) {
     if (pkt[1] == 0 || li == 3u || mode != 4u) return wifi_down(NTP_BAD_REPLY);
 
     /* 10. Extract transmit timestamp seconds (offset 40, big-endian)
-     *     and convert from NTP epoch to Unix epoch. */
+     *     and convert to a Unix epoch.
+     *
+     *     The NTP seconds field is 32 bits counting from 1900, so it
+     *     wraps on 2036-02-07 06:28:16 UTC. RFC 4330 §3 resolves the
+     *     ambiguity by the top bit: set means era 0 (1968-2036, counted
+     *     from 1900), clear means era 1 (2036-2104, counted from the
+     *     wrap point). Handling only era 0 would have made this app
+     *     reject every reply from 2036 onward — the old
+     *     "ntp_secs < NTP_EPOCH_OFFSET" guard would fire on every
+     *     era-1 timestamp and return NTP_BAD_REPLY forever.
+     *
+     *     NTP_ERA1_OFFSET is 2^32 - NTP_EPOCH_OFFSET, so era 1 is just
+     *     the era-0 arithmetic carried across the wrap. */
     uint32_t ntp_secs = ((uint32_t)pkt[40] << 24) |
                         ((uint32_t)pkt[41] << 16) |
                         ((uint32_t)pkt[42] <<  8) |
                          (uint32_t)pkt[43];
-    if (ntp_secs < NTP_EPOCH_OFFSET) return wifi_down(NTP_BAD_REPLY);  /* pre-1970 */
 
-    *out_epoch = ntp_secs - NTP_EPOCH_OFFSET;
+    if (ntp_secs & 0x80000000UL) {
+        /* Era 0. Values below the 1970 mark are 1968-69 — the server is
+         * talking nonsense, and accepting it would set the clock back
+         * decades. */
+        if (ntp_secs < NTP_EPOCH_OFFSET) return wifi_down(NTP_BAD_REPLY);
+        *out_epoch = ntp_secs - NTP_EPOCH_OFFSET;
+    } else {
+        /* Era 1: 2036-02-07 onward. */
+        *out_epoch = ntp_secs + NTP_ERA1_OFFSET;
+    }
     return wifi_down(NTP_OK);
 }
 
