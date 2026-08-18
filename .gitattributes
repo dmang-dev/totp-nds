@@ -1,0 +1,16 @@
+# Deterministic line endings for every clone, independent of the local
+# core.autocrlf setting. Git for Windows defaults autocrlf=true, which
+# made essentially every commit in this repo emit "LF will be replaced
+# by CRLF" warnings. Normalizing here settles it in-tree, so it travels
+# with the repo instead of depending on each developer's config.
+* text=auto eol=lf
+
+# The committed ROMs are build output. They must never be considered
+# text: any line-ending substitution would silently corrupt a binary
+# that people flash to hardware.
+*.nds binary
+*.dsi binary
+
+# build.bat is intentionally covered by the eol=lf rule above rather
+# than forced to CRLF. cmd.exe reads LF batch files correctly, it is
+# already LF in-tree, and it has been verified to run that way.
