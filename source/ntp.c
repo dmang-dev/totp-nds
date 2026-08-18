@@ -40,6 +40,7 @@
 #ifdef DSI_BUILD
 
 #include <dswifi9.h>
+#include <wfc.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -52,10 +53,17 @@
 #define NTP_PACKET_BYTES 48
 #define NTP_EPOCH_OFFSET 2208988800UL
 
-/* Association budget — pool.ntp.org should respond well inside 5s on a
- * working WiFi. Each frame is 1/60 s. */
-#define ASSOC_FRAME_BUDGET   (10 * 60)   /* 10s */
-#define RECV_FRAME_BUDGET    ( 5 * 60)   /* 5s */
+/* Frame budgets — each frame is 1/60 s. Association gets a generous
+ * window because WPA2 + DHCP on a cold radio is genuinely slow; the
+ * user can bail out of it at any frame, so a long ceiling costs
+ * nothing. The NTP round-trip itself gets much less. */
+#define ASSOC_FRAME_BUDGET  (20 * 60)   /* 20s */
+#define RECV_FRAME_BUDGET   ( 5 * 60)   /*  5s */
+
+/* Wifi_AssocStatus() reports DISCONNECTED both for "failed" and for
+ * "hasn't started yet". We only trust it as a failure once the state
+ * machine has been seen to move, or once this grace window has passed. */
+#define ASSOC_GRACE_FRAMES  30          /* 0.5s */
 
 /* Pump the cancel check on every frame so the user can bail with B. */
 static int b_pressed(void) {
@@ -63,44 +71,88 @@ static int b_pressed(void) {
     return (keysDown() & KEY_B) ? 1 : 0;
 }
 
+/* Tear the association down on the way out and pass the caller's result
+ * code through, so every exit path below stays a one-liner. Leaving the
+ * radio associated would keep it powered for the rest of the session —
+ * a real battery cost on a DS for a lookup that takes seconds.
+ *
+ * Only valid once Wifi_InitDefault() has succeeded. */
+static int wifi_down(int rc) {
+    Wifi_DisconnectAP();
+    return rc;
+}
+
 int ntp_sync(uint32_t *out_epoch) {
     uint8_t pkt[NTP_PACKET_BYTES];
     int sock;
     int status;
     int frame;
+    int seen_progress = 0;
 
     if (out_epoch == 0) return NTP_BAD_REPLY;
 
-    /* 1. Init dswifi using firmware-saved profile. */
-    if (!Wifi_InitDefault(WFC_CONNECT)) return NTP_WIFI_FAIL;
+    /* 1. Bring the WiFi stack up WITHOUT connecting.
+     *
+     *    INIT_ONLY leaves association to us. The alternative,
+     *    Wifi_InitDefault(WFC_CONNECT), blocks inside dswifi until the
+     *    connection resolves — which is exactly what we can't have here:
+     *    the UI promises "B cancels" while ntp_sync() runs, and a
+     *    blocking call makes that a lie for the longest phase of the
+     *    operation. See dswifi's own autoconnect example, which reads
+     *    the assigned IP on the line right after the call returns. */
+    if (!Wifi_InitDefault(INIT_ONLY)) return NTP_WIFI_FAIL;
 
-    /* 2. Wait for ASSOCIATED. Wifi_InitDefault returns immediately and
-     *    leaves the connection in progress; we poll AssocStatus until
-     *    it lands. */
+    /* 2. Pull the firmware's stored WFC profiles into dswifi.
+     *
+     *    On a DSi this reaches all six slots — the three legacy DS ones
+     *    plus the three DSi-only slots, which are the WPA/WPA2-capable
+     *    ones. That matters: the legacy WFC_CONNECT path is DS-era and
+     *    open/WEP only, so before this an ordinary WPA2 home network
+     *    was simply unreachable. */
+    wfcClearConnSlots();   /* deterministic: never stack duplicate slots */
+    wfcLoadFromNvram();
+    if (wfcGetNumSlots() == 0u) return wifi_down(NTP_NO_PROFILE);
+
+    /* 3. Start association. Returns immediately; progress shows up
+     *    through Wifi_AssocStatus() below. */
+    if (!wfcBeginAutoConnect()) return wifi_down(NTP_NOT_ASSOC);
+
+    /* 4. Poll until associated, sampling B every frame so the sync is
+     *    actually cancellable this time. */
     for (frame = 0; frame < ASSOC_FRAME_BUDGET; frame++) {
         swiWaitForVBlank();
-        if (b_pressed()) return NTP_CANCELLED;
+        if (!pmMainLoop()) return wifi_down(NTP_CANCELLED);
+        if (b_pressed())   return wifi_down(NTP_CANCELLED);
+
         status = Wifi_AssocStatus();
         if (status == ASSOCSTATUS_ASSOCIATED) break;
-        if (status == ASSOCSTATUS_DISCONNECTED && frame > 60) {
-            /* Connection genuinely failed (not just "not yet started"). */
-            return NTP_NOT_ASSOC;
+        if (status != ASSOCSTATUS_DISCONNECTED) {
+            seen_progress = 1;
+            continue;
+        }
+        /* Back at DISCONNECTED. Genuine failure if we ever saw the
+         * state machine move, or if it never moved within the grace
+         * window. */
+        if (seen_progress || frame >= ASSOC_GRACE_FRAMES) {
+            return wifi_down(NTP_NOT_ASSOC);
         }
     }
-    if (Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED) return NTP_NOT_ASSOC;
+    if (Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED) {
+        return wifi_down(NTP_NOT_ASSOC);
+    }
 
-    /* 3. Resolve the NTP pool. dswifi's gethostbyname uses the DNS
+    /* 5. Resolve the NTP pool. dswifi's gethostbyname uses the DNS
      *    server learned via DHCP during association. */
     struct hostent *he = gethostbyname(NTP_SERVER);
     if (he == 0 || he->h_addr_list == 0 || he->h_addr_list[0] == 0) {
-        return NTP_DNS_FAIL;
+        return wifi_down(NTP_DNS_FAIL);
     }
 
-    /* 4. UDP socket. */
+    /* 6. UDP socket. */
     sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) return NTP_SOCK_FAIL;
+    if (sock < 0) return wifi_down(NTP_SOCK_FAIL);
 
-    /* 5. Build + send the SNTP request. */
+    /* 7. Build + send the SNTP request. */
     memset(pkt, 0, sizeof(pkt));
     pkt[0] = 0x1B;  /* LI=0, VN=3, Mode=3 (client) */
 
@@ -113,10 +165,10 @@ int ntp_sync(uint32_t *out_epoch) {
     if (sendto(sock, pkt, NTP_PACKET_BYTES, 0,
                (struct sockaddr *)&srv, sizeof(srv)) < 0) {
         closesocket(sock);
-        return NTP_SOCK_FAIL;
+        return wifi_down(NTP_SOCK_FAIL);
     }
 
-    /* 6. Poll for the reply within RECV_FRAME_BUDGET frames. dswifi's
+    /* 8. Poll for the reply within RECV_FRAME_BUDGET frames. dswifi's
      *    socket layer exposes non-blocking via FIONBIO ioctl rather
      *    than SO_NONBLOCK setsockopt — we set it so the recvfrom loop
      *    below can check for "nothing yet" without freezing the boot. */
@@ -126,29 +178,34 @@ int ntp_sync(uint32_t *out_epoch) {
     int got = -1;
     for (frame = 0; frame < RECV_FRAME_BUDGET; frame++) {
         swiWaitForVBlank();
-        if (b_pressed()) { closesocket(sock); return NTP_CANCELLED; }
+        if (!pmMainLoop() || b_pressed()) {
+            closesocket(sock);
+            return wifi_down(NTP_CANCELLED);
+        }
         got = recvfrom(sock, pkt, NTP_PACKET_BYTES, 0, 0, 0);
         if (got == NTP_PACKET_BYTES) break;
     }
     closesocket(sock);
-    if (got != NTP_PACKET_BYTES) return NTP_TIMEOUT;
+    if (got != NTP_PACKET_BYTES) return wifi_down(NTP_TIMEOUT);
 
-    /* 7. Sanity-check the reply. Stratum 0 means kiss-of-death — the
+    /* 9. Sanity-check the reply. Stratum 0 means kiss-of-death — the
      *    server is refusing service for this client. LI=3 means
-     *    "alarm" (clock not sync'd). */
-    uint8_t li = (pkt[0] >> 6) & 0x03u;
-    if (pkt[1] == 0 || li == 3u) return NTP_BAD_REPLY;
+     *    "alarm" (clock not sync'd). Mode must be 4 (server); anything
+     *    else is not an answer to what we asked. */
+    uint8_t li   = (pkt[0] >> 6) & 0x03u;
+    uint8_t mode =  pkt[0]       & 0x07u;
+    if (pkt[1] == 0 || li == 3u || mode != 4u) return wifi_down(NTP_BAD_REPLY);
 
-    /* 8. Extract transmit timestamp seconds (offset 40, big-endian) and
-     *    convert from NTP epoch to Unix epoch. */
+    /* 10. Extract transmit timestamp seconds (offset 40, big-endian)
+     *     and convert from NTP epoch to Unix epoch. */
     uint32_t ntp_secs = ((uint32_t)pkt[40] << 24) |
                         ((uint32_t)pkt[41] << 16) |
                         ((uint32_t)pkt[42] <<  8) |
                          (uint32_t)pkt[43];
-    if (ntp_secs < NTP_EPOCH_OFFSET) return NTP_BAD_REPLY;  /* pre-1970 */
+    if (ntp_secs < NTP_EPOCH_OFFSET) return wifi_down(NTP_BAD_REPLY);  /* pre-1970 */
 
     *out_epoch = ntp_secs - NTP_EPOCH_OFFSET;
-    return NTP_OK;
+    return wifi_down(NTP_OK);
 }
 
 #else  /* !DSI_BUILD */
