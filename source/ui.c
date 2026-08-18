@@ -122,10 +122,20 @@ static int ui_read_string(const char *prompt, char *out, uint8_t max_len) {
         }
     }
 
-    /* Trim trailing spaces; copy to caller. */
+    /* Trim trailing spaces, then copy the field out.
+     *
+     * buf is a fixed 64-byte field pre-filled with spaces and is
+     * deliberately not null-terminated, so this is a bounded field
+     * copy, not a string copy. memcpy says that; strncpy did not, and
+     * gcc rightly flagged it (-Wstringop-truncation) for reading a
+     * "string" with no terminator in range. Behaviour is identical —
+     * the trim loop has already written '\0' over every trailing
+     * space, so the bytes copied are the same either way — and the
+     * explicit terminator below is what actually guarantees `out` is
+     * a valid C string. */
     int end = max_len - 2;
     while (end >= 0 && buf[end] == ' ') buf[end--] = '\0';
-    strncpy(out, buf, max_len - 1u);
+    memcpy(out, buf, max_len - 1u);
     out[max_len - 1u] = '\0';
     return 1;
 }
