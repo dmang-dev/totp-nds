@@ -27,6 +27,7 @@
 #include "rtc.h"
 #include "totp.h"
 #include "ui.h"
+#include "ntp.h"
 
 /* Forward decl — defined in ui.c, called only from here. */
 void _ui_init_consoles(void);
@@ -85,15 +86,55 @@ int main(void) {
     /* Load (or format) the savedata file. */
     uint8_t loaded = storage_init();
 
-    /* Seed software RTC: prefer the saved epoch (current at last
-     * write), fall back to the NDS hardware RTC otherwise. On true
-     * first boot, push the user through time-set so codes aren't
-     * decades off. */
+    /* Seed software RTC. Priority order:
+     *   1. (DSi-mode only) WiFi NTP sync. If it succeeds we override
+     *      whatever the saved/hardware clocks say — the network is
+     *      authoritative.
+     *   2. Saved epoch from storage — preserves time across power
+     *      cycles even if WiFi is offline at this boot.
+     *   3. NDS hardware RTC.
+     *   4. Manual time-set screen (first boot or NTP+hardware both
+     *      bogus).
+     */
     uint32_t saved = storage_get_epoch();
-    if (loaded && saved != 0u) {
-        rtc_set_epoch(saved);
-    } else {
-        rtc_init_from_system();
+    uint8_t  time_known = 0u;
+
+#ifdef DSI_BUILD
+    {
+        /* Briefly tell the user what we're doing. ntp_sync() does its
+         * own ~15-second budget; the UI message stays on screen until
+         * sync resolves or the user cancels with B. */
+        ui_show_ntp_progress("Syncing time over WiFi...\nB cancels.");
+        uint32_t e_ntp = 0u;
+        int rc = ntp_sync(&e_ntp);
+        if (rc == NTP_OK) {
+            rtc_set_epoch(e_ntp);
+            storage_set_epoch(e_ntp);
+            ui_show_ntp_progress("WiFi time-sync OK.");
+            time_known = 1u;
+        } else {
+            /* Non-fatal — fall through to the other clock sources. */
+            ui_show_ntp_progress("WiFi sync skipped.\nUsing saved/HW clock.");
+        }
+    }
+#endif
+
+    if (!time_known) {
+        if (loaded && saved != 0u) {
+            rtc_set_epoch(saved);
+            time_known = 1u;
+        } else {
+            rtc_init_from_system();
+            /* Trust the hardware RTC if it reads a sane year; otherwise
+             * push the user through time-set. */
+            if (rtc_get_epoch() > 1577836800UL /* 2020-01-01 */) {
+                time_known = 1u;
+                storage_set_epoch(rtc_get_epoch());
+            }
+        }
+    }
+
+    if (!time_known) {
         uint32_t e = ui_timeset(rtc_get_epoch());
         rtc_set_epoch(e);
         storage_set_epoch(e);

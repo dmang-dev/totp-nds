@@ -346,3 +346,20 @@ void _ui_init_consoles(void) {
     consoleInit(&topConsole,    3, BgType_Text4bpp, BgSize_T_256x256, 31, 0, true,  true);
     consoleInit(&bottomConsole, 3, BgType_Text4bpp, BgSize_T_256x256, 31, 0, false, true);
 }
+
+void ui_show_ntp_progress(const char *msg) {
+#ifdef DSI_BUILD
+    if (!msg) return;
+    ui_clear_screen(&topConsole);
+    consoleSelect(&topConsole);
+    iprintf("\n  totp-nds (DSi)\n  ============================\n\n  %s\n",
+            msg);
+    /* Tiny visible pause so transitional messages don't flash by faster
+     * than a human can read them. ntp_sync() polls its own VBlanks
+     * during association/recv so this only adds latency to the
+     * immediate "OK/skipped" message at the end. */
+    for (int i = 0; i < 30; i++) swiWaitForVBlank();
+#else
+    (void)msg;
+#endif
+}

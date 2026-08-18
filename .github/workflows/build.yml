@@ -36,9 +36,10 @@ jobs:
 
       - name: Build totp-nds.nds + totp-nds.dsi
         run: |
-          # devkitARM container already has DEVKITARM + DEVKITPRO exported
-          make
-          make dsi
+          # devkitARM container already has DEVKITARM + DEVKITPRO exported.
+          # `make release` sequences clean → .nds → .dsi → restore .nds
+          # so both artifacts come out with the right DSI_BUILD setting.
+          make release
           ls -lh totp-nds.nds totp-nds.dsi
 
       - name: Upload artifacts
