@@ -2,12 +2,12 @@
  * totp-nds — RFC 6238 TOTP authenticator for Nintendo DS / DS Lite,
  * with native runtime on DSi and 3DS via DS-mode.
  *
- * Sibling of totp-gb / totp-gba / totp-psp. The crypto core (sha1.c,
- * hmac.c, base32.c, totp.c, datetime.c) is byte-for-byte identical
- * across all four — if those KATs pass on GBA they pass here. Platform
- * glue is NDS-specific: rtc.c (hardware RTC via libnds + newlib time),
- * storage.c (libfat to SD or DLDI flashcart), ui.c (dual-screen
- * PrintConsole text mode).
+ * Sibling of totp-gb / totp-gba / totp-3ds / totp-psp. The crypto core
+ * (sha1.c, hmac.c, base32.c, totp.c — plus datetime.c everywhere except
+ * totp-gb) is byte-for-byte identical across the family — if those KATs
+ * pass on GBA they pass here. Platform glue is NDS-specific: rtc.c
+ * (hardware RTC via libnds + newlib time), storage.c (libfat to SD or
+ * DLDI flashcart), ui.c (dual-screen PrintConsole text mode).
  *
  * Boot sequence:
  *   1. videoSetMode + dual PrintConsole init (top = display, bottom = menu)

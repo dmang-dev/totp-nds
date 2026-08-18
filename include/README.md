@@ -11,3 +11,6 @@ C headers paired with `source/`. One header per implementation file.
 | `ui.h` | Dual-screen PrintConsole UI. |
 
 Edits to the crypto-core headers MUST be mirrored across the family.
+`sha1.h`, `hmac.h`, `base32.h` and `totp.h` are in all five repos;
+`datetime.h` is **not present in `totp-gb`**. `totp-gb` keeps its headers
+in `src/` alongside the sources.

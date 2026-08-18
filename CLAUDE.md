@@ -55,10 +55,28 @@ totp-nds.dsi              prebuilt DSi-mode ROM (committed)
 
 ## Conventions
 
-- **Crypto core (sha1 / hmac / base32 / totp / datetime) is byte-identical
-  with sibling `totp-*` repos.** Any edit MUST be mirrored across the family
-  (`totp-gb`, `totp-gba`, `totp-3ds`, `totp-psp`). If you touch these files
-  here, copy them to the other four.
+- **Crypto core is byte-identical across the `totp-*` family.** Any edit
+  MUST be mirrored, or the five ports silently diverge. The shape is not
+  uniform, so check before copying:
+  - `sha1`, `hmac`, `base32`, `totp` — both `.c` and `.h` — are in **all
+    five** repos: here plus `totp-gb`, `totp-gba`, `totp-3ds`, `totp-psp`.
+  - `datetime.c` / `datetime.h` are in **four**. `totp-gb` does not have
+    them and does not need them. Don't "fix" that by copying them in.
+  - `totp-gb` keeps sources *and* headers in `src/`. The other four split
+    `source/` + `include/`.
+- **Verify the invariant with blob hashes, never with files on disk.**
+  These repos check out with different line endings, so `diff` and
+  `sha256sum` over working-tree copies report divergence that isn't real.
+  Compare what git actually stores:
+
+  ```
+  git -C <repo> rev-parse HEAD:source/sha1.c   # src/sha1.c in totp-gb
+  ```
+
+  All five agreed as of v1.1.0. For the same reason, don't trust `grep`
+  or `awk` to detect CR bytes in this MSYS shell — both have returned
+  confidently wrong answers here. Use `git cat-file -s` / `git ls-files
+  --eol`.
 - **Boot self-test validates RFC 6238 vectors before UI starts.** Don't
   bypass it. On failure, the screen stops for 5 seconds with a visible
   error — a broken build can't quietly generate wrong codes. `make

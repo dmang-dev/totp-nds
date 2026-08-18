@@ -12,8 +12,15 @@ C sources for `totp-nds`. ARM946E-S, devkitARM + libnds + libfat.
 | `totp.c` | TOTP per RFC 6238. |
 | `datetime.c` | epoch <-> Y/M/D. |
 
-Edits to these MUST be mirrored into `totp-gb`, `totp-gba`, `totp-3ds`,
-and `totp-psp`. Shared crypto core for the family.
+Edits to these MUST be mirrored across the family, or the ports silently
+diverge. Note the shape is not uniform: `sha1.c`, `hmac.c`, `base32.c` and
+`totp.c` are in all five repos, but `datetime.c` is **not present in
+`totp-gb`** — don't copy it there. `totp-gb` also keeps its sources in
+`src/` rather than `source/`.
+
+Compare blob hashes (`git -C <repo> rev-parse HEAD:source/sha1.c`), not
+files on disk — these repos check out with different line endings, so
+`diff` reports divergence that isn't real.
 
 ## Platform glue (NDS-specific)
 
