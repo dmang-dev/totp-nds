@@ -35,7 +35,7 @@ Two pre-built artifacts are checked in:
 | File | Use when | Why |
 |---|---|---|
 | [`totp-nds.nds`](totp-nds.nds) | DS / DS Lite (DLDI flashcart), or DSi/3DS via DS-mode | Universal — runs everywhere via DS-mode |
-| [`totp-nds.dsi`](totp-nds.dsi) | DSi / 2DS / 3DS exclusively | DSi-enhanced (unit code 0x03, 0x4000-byte header) + **WiFi NTP auto time-sync on boot** — uses a DSi firmware WFC profile to query `pool.ntp.org` and skip the time-set screen entirely. Falls back gracefully if WiFi is unavailable. v2.0+ will add DSi camera support for secret entry. |
+| [`totp-nds.dsi`](totp-nds.dsi) | DSi / 2DS / 3DS exclusively | DSi-enhanced (unit code 0x03, 0x4000-byte header) — Home Menu / TWiLight Menu++ recognizes it as a DSi app rather than a DS-mode ROM. On the unreleased `wip/ntp` branch this build also carries **WiFi NTP auto time-sync on boot** (see [Status](#status) — not yet validated on hardware). v2.0+ will add DSi camera support for secret entry. |
 
 ### DSi / 3DS
 
@@ -55,11 +55,12 @@ DeSmuME, melonDS, no$gba all run `totp-nds.nds` directly. For the
 `.dsi`, use melonDS in DSi-mode (DeSmuME doesn't emulate DSi). melonDS
 is also recommended for the most accurate RTC behavior.
 
-**On the `.dsi` build**: boot tries WiFi NTP first (~5-15 s on a working
-profile). On success you land directly on the live account list with
-correct UTC time. On failure (no profile, AP unreachable, server
-unreachable) the app falls back to the manual time-set screen exactly
-like the `.nds` build.
+**On the `.dsi` build** (unreleased `wip/ntp` branch only): boot tries
+WiFi NTP first (~5-15 s on a working profile). On success you land
+directly on the live account list with correct UTC time. On failure (no
+profile, AP unreachable, server unreachable) the app falls back to the
+manual time-set screen exactly like the `.nds` build. This path has not
+been validated on DSi hardware yet.
 
 **On the `.nds` build**: first boot lands on the time-set screen so the
 software RTC isn't off by years. After that you're on the live
@@ -183,10 +184,14 @@ totp-nds.dsi              prebuilt DSi-mode ROM with WiFi NTP (committed)
 ### Why a software RTC anchor
 
 The NDS hardware RTC is wall-clock-only — no timezone field, year
-limited to 2000-2099. We read it once at boot, treat it as UTC by
-convention, and let the user override via the time-set screen. The
-override is anchored to the system tick counter so the clock keeps
-advancing even if you never re-confirm.
+limited to 2000-2099. We read it once at boot and treat it as UTC by
+convention, but we never accept that reading unconfirmed: with no
+timezone field and most consoles set to local time, silently trusting
+it would generate codes off by the user's UTC offset with nothing on
+screen to explain why. So on a boot with no saved epoch the reading
+only pre-fills the time-set screen, and the user confirms it. The
+resulting override is anchored to the system tick counter so the clock
+keeps advancing even if you never re-confirm.
 
 ### Why libfat instead of NDS save SRAM
 
@@ -229,11 +234,18 @@ keyboard tracked as a future enhancement.
 
 ## Status
 
-**v1.0.1** — shipped. Both prebuilt ROMs committed at repo root
-(`totp-nds.nds` universal, `totp-nds.dsi` DSi-mode with WiFi NTP) and
+**v1.0.1** — shipped. Both prebuilt ROMs are committed at repo root and
 published on the [GitHub release
-page](https://github.com/dmang-dev/totp-nds/releases). Boot self-test
-+ host KAT harness + CI all green on every push.
+page](https://github.com/dmang-dev/totp-nds/releases). Boot self-test +
+host KAT harness + CI all green on every push. This release does **not**
+include WiFi time-sync — `totp-nds.dsi` at v1.0.1 is the universal
+binary in a DSi-flagged header.
+
+**v1.1.0** — in development on `wip/ntp`, unreleased. Adds the SNTPv3
+WiFi time-sync described above to the `.dsi` build. Not yet validated on
+DSi hardware; the association path still needs to move off the legacy
+blocking `Wifi_InitDefault()` shim onto libnds' `wfc.h` API before it
+can reach the DSi's WPA-capable profile slots.
 
 **Known limitations**:
 

@@ -62,7 +62,12 @@ totp-nds.dsi              prebuilt DSi-mode ROM (committed)
 - **Boot self-test validates RFC 6238 vectors before UI starts.** Don't
   bypass it. On failure, the screen stops for 5 seconds with a visible
   error — a broken build can't quietly generate wrong codes. `make
-  CPPFLAGS=-DSKIP_SELFTEST` only for crypto-unrelated UI work.
+  CPPFLAGS=-DSKIP_SELFTEST` only for crypto-unrelated UI work — and note
+  that `make dsi` already passes `CPPFLAGS=-DDSI_BUILD` on the command
+  line, so combining the two needs
+  `make dsi CPPFLAGS="-DDSI_BUILD -DSKIP_SELFTEST"` (a bare
+  `CPPFLAGS=-DSKIP_SELFTEST` would silently drop `DSI_BUILD` and build
+  the stub NTP path into the `.dsi`).
 - **Built ROMs are committed at repo root** (`totp-nds.nds`,
   `totp-nds.dsi`). Both must be updated on a release.
 
@@ -75,8 +80,17 @@ totp-nds.dsi              prebuilt DSi-mode ROM (committed)
   without an SD slot. `storage.c` falls back to volatile mode (changes
   lost on power-off) with a UI warning. Don't treat libfat failure as fatal.
 - **DSi WiFi NTP requires a configured firmware WFC profile.** Without one,
-  `ntp.c` times out and falls through to the manual time-set screen. The
-  `.nds` build doesn't include `ntp.c` at all (gated by `-DDSI_BUILD`).
+  `ntp.c` times out and falls through to the manual time-set screen.
+  `ntp.c` is compiled into *both* builds — the Makefile globs
+  `source/*.c` — but only its body is gated on `-DDSI_BUILD`; the `.nds`
+  build gets a stub `ntp_sync()` that always returns `NTP_WIFI_FAIL`.
+- **Never accept the hardware RTC reading unconfirmed.** The NDS RTC has
+  no timezone field and users overwhelmingly set it to local time, while
+  we interpret the reading as UTC. Auto-trusting it (e.g. "the year looks
+  sane, ship it") silently produces codes off by the user's UTC offset
+  with nothing on screen to explain why. On a boot with no saved epoch it
+  may only pre-fill `ui_timeset()`. This regressed once on `wip/ntp` —
+  don't reintroduce it.
 - **NDS hardware RTC is wall-clock-only** (no timezone, year 2000-2099).
   We read once at boot, treat as UTC by convention, anchor to the system
   tick. Same trade-off as `totp-gba`'s Seiko S-3511A.
