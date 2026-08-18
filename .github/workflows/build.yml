@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build and run KATs
         run: |
@@ -27,7 +27,7 @@ jobs:
       image: devkitpro/devkitarm:latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Show toolchain versions
         run: |
@@ -36,13 +36,14 @@ jobs:
 
       - name: Build totp-nds.nds + totp-nds.dsi
         run: |
-          # devkitARM container already has DEVKITARM + DEVKITPRO exported
-          make
-          make dsi
+          # devkitARM container already has DEVKITARM + DEVKITPRO exported.
+          # `make release` sequences clean → .nds → .dsi → restore .nds
+          # so both artifacts come out with the right DSI_BUILD setting.
+          make release
           ls -lh totp-nds.nds totp-nds.dsi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: totp-nds
           path: |

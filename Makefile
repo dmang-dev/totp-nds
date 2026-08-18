@@ -29,8 +29,11 @@ CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=ds_arm9.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-# libfat for SD/flashcart persistence, libnds9 for everything else.
-LIBS     := -lfat -lnds9
+# libfat for SD/flashcart persistence, dswifi9 for the DSi-mode NTP
+# sync (link is harmless on the .nds build — unused dswifi9 functions
+# don't pull anything in unless DSI_BUILD code references them), and
+# libnds9 for everything else.
+LIBS     := -lfat -ldswifi9 -lnds9
 LIBDIRS  := $(LIBNDS) $(PORTLIBS)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
@@ -71,16 +74,35 @@ $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
-.PHONY: dsi
-# DSi-enhanced build: same ELF, repackaged with ndstool's DSi header
-# (0x4000-byte header, DSi unit code, DSi title-ID prefix). Identifies
-# as a DSi app to Home Menu / TWiLight Menu++ instead of "DS-mode
-# running on DSi". Same binary semantics — the differentiating features
-# (WiFi NTP, camera) arrive in v1.1+.
+.PHONY: dsi release
+# Release build: produces both totp-nds.nds (universal, no DSi WiFi) and
+# totp-nds.dsi (DSi-mode with WiFi NTP). The `dsi` target overwrites
+# build/ with DSI_BUILD-defined object files, so we sequence: clean →
+# .nds → save → clean → .dsi → restore. CI calls this single target.
+release:
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory
+	@cp $(TARGET).nds $(TARGET).nds.tmp
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory dsi
+	@mv $(TARGET).nds.tmp $(TARGET).nds
+	@echo built ... $(TARGET).nds + $(TARGET).dsi
+
+# DSi-enhanced build. Two differences from the universal .nds build:
 #
-# Uses the same Calico ARM7 ELF as the standard .nds build; for stage A
-# we don't need DSi-only ARM7 features, only a DSi-flagged header.
-dsi: $(BUILD)
+#   1. Re-link the same source tree with CPPFLAGS=-DDSI_BUILD so the
+#      WiFi/NTP code in ntp.c is compiled in. The .nds build builds
+#      the same files but ntp_sync() is a no-op stub there.
+#   2. Repackage via ndstool with the DSi header (unit code 0x03,
+#      0x4000-byte header, DSi title-ID prefix). Home Menu / TWiLight
+#      Menu++ recognize it as a DSi app instead of "DS-mode running
+#      on DSi".
+#
+# The relinked ELF reuses build/ — `make dsi` after a fresh `make` will
+# repickle the ELF only if DSI_BUILD changed any compilation. To force a
+# clean DSi-only build use `make clean && make dsi`.
+dsi:
+	@$(MAKE) --no-print-directory CPPFLAGS=-DDSI_BUILD $(BUILD)
 	@ndstool -c $(TARGET).dsi -9 $(TARGET).elf \
 		-7 $(CALICO)/bin/ds7_maine.elf \
 		-h 0x4000 -u 0x00030004 \

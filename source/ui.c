@@ -122,10 +122,20 @@ static int ui_read_string(const char *prompt, char *out, uint8_t max_len) {
         }
     }
 
-    /* Trim trailing spaces; copy to caller. */
+    /* Trim trailing spaces, then copy the field out.
+     *
+     * buf is a fixed 64-byte field pre-filled with spaces and is
+     * deliberately not null-terminated, so this is a bounded field
+     * copy, not a string copy. memcpy says that; strncpy did not, and
+     * gcc rightly flagged it (-Wstringop-truncation) for reading a
+     * "string" with no terminator in range. Behaviour is identical —
+     * the trim loop has already written '\0' over every trailing
+     * space, so the bytes copied are the same either way — and the
+     * explicit terminator below is what actually guarantees `out` is
+     * a valid C string. */
     int end = max_len - 2;
     while (end >= 0 && buf[end] == ' ') buf[end--] = '\0';
-    strncpy(out, buf, max_len - 1u);
+    memcpy(out, buf, max_len - 1u);
     out[max_len - 1u] = '\0';
     return 1;
 }
@@ -345,4 +355,21 @@ void _ui_init_consoles(void) {
 
     consoleInit(&topConsole,    3, BgType_Text4bpp, BgSize_T_256x256, 31, 0, true,  true);
     consoleInit(&bottomConsole, 3, BgType_Text4bpp, BgSize_T_256x256, 31, 0, false, true);
+}
+
+void ui_show_ntp_progress(const char *msg) {
+#ifdef DSI_BUILD
+    if (!msg) return;
+    ui_clear_screen(&topConsole);
+    consoleSelect(&topConsole);
+    iprintf("\n  totp-nds (DSi)\n  ============================\n\n  %s\n",
+            msg);
+    /* Tiny visible pause so transitional messages don't flash by faster
+     * than a human can read them. ntp_sync() polls its own VBlanks
+     * during association/recv so this only adds latency to the
+     * immediate "OK/skipped" message at the end. */
+    for (int i = 0; i < 30; i++) swiWaitForVBlank();
+#else
+    (void)msg;
+#endif
 }
